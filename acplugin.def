@@ -1,0 +1,4 @@
+<plugin>
+   <file name="Access_control_diff.dll"/>
+   <load env="Service"/>
+</plugin>
