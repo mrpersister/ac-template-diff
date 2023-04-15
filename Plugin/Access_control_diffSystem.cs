@@ -1,115 +1,97 @@
-using Access_control_diff.Managers;
-using Access_control_diff.Resources;
+﻿using DemoAccessControlPlugin.Client;
+using DemoAccessControlPlugin.Configuration;
+using DemoAccessControlPlugin.Managers;
 using System;
 using System.Collections.Generic;
-using System.Globalization;
-using System.Linq;
 using VideoOS.Platform.AccessControl.Plugin;
 
-namespace Access_control_diff.Plugin
+namespace DemoAccessControlPlugin
 {
     /// <summary>
-    /// A container class for all other key classes.
+    /// The ACSystem represents an instance of the access control system in the VMS,
+    /// and exposes the different manager classes needed for handing connection, events, states, etc.
     /// </summary>
-    public class Access_control_diffSystem : ACSystem, ISystem
+    internal class DemoAccessControlSystem : ACSystem
     {
-        #region Fields
-        private Access_control_diffConnectionManager _connectionManager;
-        private Access_control_diffConfigurationManager _configurationManager;
-        private Access_control_diffCredentialHolderManager _credentialHolderManager;
-        private Access_control_diffCommandManager _commandManager;
-        private Access_control_diffStateManager _stateManager;
-        private Access_control_diffEventManager _eventManager;
-        private List<ACExternalCommand> _externalCommands = new List<ACExternalCommand>();
-        #endregion
+        private SystemProperties _systemProperties;
+        private DemoClient _client;
+        private CommandManager _commandManager;
+        private ConfigurationManager _configurationManager;
+        private ConnectionManager _connectionManager;
+        private CredentialHolderManager _credentialHolderManager;
+        private EventManager _eventManager;
+        private StateManager _stateManager;
+        private AlarmSynchronizer _alarmSynchronizer;
+        private IEnumerable<ACExternalCommand> _externalCommands;
 
-        #region ACSystem Properties
-        public override ACConnectionManager ConnectionManager
-        {
-            get { return _connectionManager; }
-        }
-        public override ACConfigurationManager ConfigurationManager
-        {
-            get { return _configurationManager; }
-        }
-        public override ACCredentialHolderManager CredentialHolderManager
-        {
-            get { return _credentialHolderManager; }
-        }
-        public override ACCommandManager CommandManager
-        {
-            get { return _commandManager; }
-        }
-        public override ACStateManager StateManager
-        {
-            get { return _stateManager; }
-        }
-        public override ACEventManager EventManager
-        {
-            get { return _eventManager; }
-        }
-        public override IEnumerable<ACExternalCommand> ExternalCommands
-        {
-            get { return _externalCommands; }
-        }
-        #endregion
+        public override ACCommandManager CommandManager { get { return _commandManager; } }
+        public override ACConfigurationManager ConfigurationManager { get { return _configurationManager; } }
+        public override ACConnectionManager ConnectionManager { get { return _connectionManager; } }
+        public override ACCredentialHolderManager CredentialHolderManager { get { return _credentialHolderManager; } }
+        public override ACEventManager EventManager { get { return _eventManager; } }
+        public override ACStateManager StateManager { get { return _stateManager; } }
+        public override IEnumerable<ACExternalCommand> ExternalCommands { get { return _externalCommands; } }
 
-        #region ISystem Members
-        // Explicit interface implementation (not returning the base class) avoids typecasts by consumer
-        Access_control_diffConnectionManager ISystem.ConnectionManager
-        {
-            get { return _connectionManager; }
-        }
-        Access_control_diffConfigurationManager ISystem.ConfigurationManager
-        {
-            get { return _configurationManager; }
-        }
-        Access_control_diffCredentialHolderManager ISystem.CredentialHolderManager
-        {
-            get { return _credentialHolderManager; }
-        }
-        Access_control_diffCommandManager ISystem.CommandManager
-        {
-            get { return _commandManager; }
-        }
-        Access_control_diffStateManager ISystem.StateManager
-        {
-            get { return _stateManager; }
-        }
-        Access_control_diffEventManager ISystem.EventManager
-        {
-            get { return _eventManager; }
-        }
-        #endregion
 
         /// <summary>
-        /// Initialize the system, with an old configuration, saved from last execution, or an almost empty one when
-        /// new system is created.
+        /// Indicate that the plug-in and Access Control system supports personalized log-in.
+        /// The plug-in must implement <see cref="ConfigurationManager.FetchPersonalizedConfigurationAsync(string, string, long)"
+        /// and <see cref="CommandManager.ExecuteCommand(string, string, string, string, string)"/>/>
+        /// In order to utilize this, the "Operator login required" must be checked in the VMS after having added the system.
         /// </summary>
-        /// <param name="configuration"></param>
+        public override bool PersonalizedLoginSupported
+        {
+            get { return true; }
+        }
+
         public override void Init(ACConfiguration configuration)
         {
-            _connectionManager = new Access_control_diffConnectionManager(this);
-            _configurationManager = new Access_control_diffConfigurationManager(this, configuration);
-            _credentialHolderManager = new Access_control_diffCredentialHolderManager(this);
-            _commandManager = new Access_control_diffCommandManager(this);
-            _stateManager = new Access_control_diffStateManager(this);
-            _eventManager = new Access_control_diffEventManager(this);
+            ACUtil.Log(false, "DemoACPlugin.DemoAccessControlSystem", "Initializing access control system.");
+
+            _systemProperties = new SystemProperties();
+            _client = new DemoClient(_systemProperties);
+
+            _commandManager = new CommandManager(_systemProperties, _client);
+            _configurationManager = new ConfigurationManager(_systemProperties, _client, configuration);
+            _connectionManager = new ConnectionManager(_client);
+            _credentialHolderManager = new CredentialHolderManager(_systemProperties, _client);
+            _eventManager = new EventManager(_client);
+            _stateManager = new StateManager(_client);
+
+            // Pass the ACAlarmRepository to a separate class for handling two-way alarm synchronization, if needed
+            _alarmSynchronizer = new AlarmSynchronizer(_client, ACAlarmRepository);
         }
 
         public override void Close()
         {
-            throw new NotImplementedException("Close");
+            _commandManager.Close();
+            _configurationManager.Close();
+            _connectionManager.Close();
+            _credentialHolderManager.Close();
+            _eventManager.Close();
+            _stateManager.Close();
+            _alarmSynchronizer.Close();
+
+            _client.Close();
+            ACUtil.Log(false, "DemoACPlugin.DemoAccessControlSystem", "Access control system unloaded.");
         }
 
         /// <summary>
-        /// This method sets the properties relevant for connecting to an Access Control system.
-        /// If any properties are incorrect, Exception can be thrown.
+        /// Apply the properties, which are specified when configuring the access control system in the VMS administrator.
+        /// SetProperties is called after initialization on both start-up and when configuring the system in the VMS.
         /// </summary>
-        /// <param name="properties"></param>
         public override void SetProperties(IEnumerable<ACProperty> properties)
         {
-            throw new NotImplementedException("SetProperties");
+            _systemProperties.UpdateProperties(properties);
+
+            // Update external commands (uses the system address from the properties)
+            var cardholderManagementUri = new UriBuilder("http", _systemProperties.Address, _systemProperties.Port, "DemoACServerApplication/CardholderManagement/").Uri;
+            var reportingUri = new UriBuilder("http", _systemProperties.Address, _systemProperties.Port, "DemoACServerApplication/Reporting/").Uri;
+            _externalCommands = new[]
+            {
+                new ACExternalCommand("Cardholder management", cardholderManagementUri.AbsoluteUri, ACExternalCommandTypes.OpenUrlInExternalBrowser, 1),
+                new ACExternalCommand("Reporting", reportingUri.AbsoluteUri, ACExternalCommandTypes.OpenUrlInExternalBrowser, 2),
+            };
         }
     }
 }

@@ -1,41 +1,52 @@
-using Access_control_diff.Plugin;
-using Access_control_diff.Resources;
+﻿using DemoAccessControlPlugin.Client;
+using DemoAccessControlPlugin.Constants;
 using System;
-using System.Collections.Generic;
-using System.Diagnostics;
-using System.Globalization;
-using System.Linq;
-using System.Threading;
-using System.Threading.Tasks;
-using VideoOS.Platform;
 using VideoOS.Platform.AccessControl.Elements;
 using VideoOS.Platform.AccessControl.Plugin;
-using VideoOS.Platform.AccessControl.TypeCategories;
 
-namespace Access_control_diff.Managers
+namespace DemoAccessControlPlugin.Managers
 {
-    public delegate void AccessControllerConnectedStateChange(Uri uri, bool connected);
-
     /// <summary>
-    /// All events coming from the Access Control System should be converted to a ACEvent using the 
-    /// available ACEventTypes.
+    /// The EventManager is responsible for calling FireEventsOccurred.
     /// </summary>
-    public class Access_control_diffEventManager : ACEventManager
+    internal class EventManager : ACEventManager
     {
-        private ISystem _system;
+        private readonly DemoClient _client;
 
-        internal Access_control_diffEventManager(ISystem system)
+        public EventManager(DemoClient client)
         {
-            _system = system;
-
-            //Sugestion: start your background thread here to receive events from your 
-            //      access control system (perhaps controlled by the connection manager?)
-
-            // All new events should be converted into ACEvent, and forwarded into the MIP AC framework
-            //      via a call to the base method:
-            //         protected void FireEventsOccurred(IEnumerable<ACEvent> acEvents)
-
+            _client = client;
+            _client.EventTriggered += _client_EventTriggered;
+            _client.Connected += _client_Connected;
+            _client.Disconnected += _client_Disconnected;
         }
 
+        public void Close()
+        {
+            _client.EventTriggered -= _client_EventTriggered;
+            _client.Connected -= _client_Connected;
+            _client.Disconnected -= _client_Disconnected;
+        }
+
+        private void _client_EventTriggered(object sender, EventTriggeredEventArgs e)
+        {
+            FireEventsOccurred(new[] { e.Event });
+        }
+
+        private void _client_Connected(object sender, EventArgs e)
+        {
+            FireServerEvent(EventTypes.ServerConnected);
+        }
+
+        private void _client_Disconnected(object sender, EventArgs e)
+        {
+            FireServerEvent(EventTypes.ServerDisconnected);
+        }
+
+        private void FireServerEvent(ACEventType eventType)
+        {
+            var @event = new ACEvent(Guid.NewGuid().ToString(), eventType.Id, _client.ServerId, DateTime.UtcNow, eventType.Name, string.Empty, null, null, null);
+            FireEventsOccurred(new[] { @event });
+        }
     }
 }

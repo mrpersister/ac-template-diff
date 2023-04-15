@@ -1,41 +1,65 @@
-using Access_control_diff.Plugin;
+﻿using DemoAccessControlPlugin.Client;
 using System;
 using VideoOS.Platform.AccessControl.Plugin;
 
-namespace Access_control_diff.Managers
+namespace DemoAccessControlPlugin.Managers
 {
     /// <summary>
-    /// This class is used when a configuration is received, checked and saved by the administrator.
-    /// 
-    /// It it NOT used when updating the configuration via the ConfigurationManager, as the 
-    /// ACConfigurationManager is entirely used for trying to get new configurations.
-    /// 
-    /// Make sure to keep the accepted live systems apart from the temporary systems fetched via the ACConfigurationManager,
-    /// as you may have live connections running to a system, while the administrator tries to update, but then discard the updated configuration set.
+    /// The ConnectionManager is responsible for calling FireACSystemConnectionStateChanged,
+    /// as well as implementing Connect/Disconnect, which should start/stop event and status subscription.
     /// </summary>
-    public class Access_control_diffConnectionManager : ACConnectionManager
+    internal class ConnectionManager : ACConnectionManager
     {
-        private ISystem _system;
+        private readonly DemoClient _client;
 
-        internal Access_control_diffConnectionManager(ISystem system)
+        public ConnectionManager(DemoClient client)
         {
-            _system = system;
+            _client = client;
+            _client.Connected += _client_Connected;
+            _client.Disconnected += _client_Disconnected;
         }
 
-        /// <summary>
-        /// When called the plugin should create the nessesary connection to the access control system in order to receive event, state changes, execute commands etc.
-        /// </summary>
         public override void Connect()
         {
-            throw new NotImplementedException("Connect");
+            _client.StartEventPolling();
+        }
+
+        public override void Disconnect()
+        {
+            _client.StopEventPolling();
+        }
+
+        public void Close()
+        {
+            _client.Connected -= _client_Connected;
+            _client.Disconnected -= _client_Disconnected;
         }
 
         /// <summary>
-        /// When called the plugin should close the connection to the access control system.
+        /// Validate user credentials for personalized log-in.
         /// </summary>
-        public override void Disconnect()
+        public override ACUserCredentialsValidationResult ValidateUserCredentials(string username, string password)
         {
-            throw new NotImplementedException("Connect");
+            try
+            {
+                var valid = _client.CheckCredentials(username, password);
+                return new ACUserCredentialsValidationResult(valid);
+            }
+            catch (DemoApplicationClientException ex)
+            {
+                ACUtil.Log(true, "DemoACPlugin.ConnectionManager", "Error validating user credentials: " + ex.Message);
+                return new ACUserCredentialsValidationResult(false);
+            }
+        }
+
+        private void _client_Connected(object sender, EventArgs e)
+        {
+            FireACSystemConnectionStateChanged(true);
+        }
+
+        private void _client_Disconnected(object sender, EventArgs e)
+        {
+            FireACSystemConnectionStateChanged(false);
         }
     }
 }

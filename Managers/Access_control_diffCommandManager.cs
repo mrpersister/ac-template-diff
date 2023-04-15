@@ -1,34 +1,63 @@
-using Access_control_diff.Plugin;
-using Access_control_diff.Resources;
-using System;
-using VideoOS.Platform.AccessControl;
-using VideoOS.Platform.AccessControl.Elements;
+﻿using DemoAccessControlPlugin.Client;
+using DemoAccessControlPlugin.Configuration;
+using DemoAccessControlPlugin.Constants;
 using VideoOS.Platform.AccessControl.Plugin;
-using VideoOS.Platform.AccessControl.TypeCategories;
 
-namespace Access_control_diff.Managers
+namespace DemoAccessControlPlugin.Managers
 {
     /// <summary>
-    /// Handle command to control the Access Control system
-    /// 
-    /// The key function for this class is to execute commands being fired.
-    /// 
-    /// This template also suggest to have the definition of what commands are
-    /// available in this class, and provide to the ConfigurationManager when needed.
+    /// The CommandManager is responsible for executing commands towards the access control system (ExecuteCommand).
     /// </summary>
-    public class Access_control_diffCommandManager : ACCommandManager
+    internal class CommandManager : ACCommandManager
     {
-        private ISystem _system;
+        private SystemProperties _systemProperties;
+        private DemoClient _client;
 
-        internal Access_control_diffCommandManager(ISystem system)
+        public CommandManager(SystemProperties systemProperties, DemoClient client)
         {
-            _system = system;
+            _systemProperties = systemProperties;
+            _client = client;
         }
 
-        public override ACCommandResult ExecuteCommand(string operationableInstanceId, string commandTypeId, string vmsUsername)
+        public void Close()
         {
-            throw new NotImplementedException("ExecuteCommand");
         }
 
+        /// <summary>
+        /// Execute a command. Used when personalized log-in is not enabled.
+        /// </summary>
+        public override ACCommandResult ExecuteCommand(string operationableInstance, string commandType, string vmsUsername)
+        {
+            // Execute the command using the admin user.
+            return ExecuteCommand(operationableInstance, commandType, _systemProperties.AdminUser, _systemProperties.AdminPassword, vmsUsername);
+        }
+
+        /// <summary>
+        /// Execute a command. Used when personalized log-in is enabled.
+        /// </summary>
+        public override ACCommandResult ExecuteCommand(string operationableInstance, string commandType, string username, string password, string vmsUsername)
+        {
+            try
+            {
+                if (commandType == CommandTypes.DoorLock.Id)
+                {
+                    _client.LockDoor(operationableInstance, username, password, vmsUsername);
+                }
+                else if (commandType == CommandTypes.DoorUnlock.Id)
+                {
+                    _client.UnlockDoor(operationableInstance, username, password, vmsUsername);
+                }
+                else
+                {
+                    return new ACCommandResult(false, "Invalid command.");
+                }
+            }
+            catch (DemoApplicationClientException ex)
+            {
+                ACUtil.Log(true, "DemoACPlugin.CommandManager", "Error executing command " + commandType + " on door " + operationableInstance + ": " + ex.Message);
+                return new ACCommandResult(false, ex.Message);
+            }
+            return new ACCommandResult(true);
+        }
     }
 }
